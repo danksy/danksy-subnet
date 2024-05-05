@@ -1,42 +1,70 @@
-# Commune Subnet Templeate
+# Danksy Subnet code based on Commune Subnet Templeate
 
-Subnet template built on top of [CommuneX](https://github.com/agicommies/communex).
+Danksy Subnet built on top of [CommuneX](https://github.com/agicommies/communex).
+Learn how to structure, build and deploy a subnet on [Commune AI](https://communeai.org/)!
 
-Lern how to structure, build and deploy a subnet on [Commune AI](https://communeai.org/)!
+## Subnet Objective
 
-## Dependencies
+[danksy.ai](https://danksy.ai) is a project that aims to bring fun to the AI community via training models that can make _funny_ content. 
+Our goal is to have an agentic model that can use a variety of existing content creation tools and APIs to make memes and much more.
 
-The whole subnet template is built on top of the [CommuneX library / SDK](https://github.com/agicommies/communex).
-Which is truly the only essential dependency.
+The current implementation is aimed at incentivizing the subnet to run models that can generate data that would be fed into agent workflows.
+Initially, we will be using a [fixed dataset](https://huggingface.co/datasets/dknoller/danksy-dataset) but will transition to a streaming dataset as more users are  
 
-Although in order to make the template more explict we also provide additional libraries.
-You can find the whole dependency list we used in the [requirements.txt](./requirements.txt) file.
+### Current Goals
+- [x] Subnet Creation
+- [x] Initial prompting
+- [ ] Upload dataset
+- [ ] Set up streaming
+- [ ] Integrate with danksy production
 
-```txt
-communex
-typer
-uvicorn
-keylimiter
-pydantic-settings
-```
+As these goals are a moving target, implementation and cadence will vary over time. 
 
-## Miner
+## Validator Setup
 
-From the root of your project, you can just call **comx module serve**. For example:
 
+### Prerequisites
+
+Please ensure that you have the following environment variable set:
 ```sh
-comx module serve commune-subnet-template.subnet.miner.model.Miner <name-of-your-com-key> [--subnets-whitelist <your-subnet-netuid>] \
-[--ip <text>] [--port <number>]
+DANKSY_WORKLOAD_URL=https://workloads.danksy.ai/workload
 ```
 
-## Validator
-
+### Running
 To run the validator, just call the file in which you are executing `validator.validate_loop()`. For example:
 
 ```sh
 python3 -m commune-subnet-template.subnet.cli <name-of-your-com-key>
 ```
 
-## Further reading
+## Miner Setup
 
-For full documentation of the Commune AI ecosystem, please visit the [Official Commune Page](https://communeai.org/), and it's developer documentation. There you can learn about all subnet details, deployment, and more!
+### Prerequisites
+Please ensure that you have the following environment variables set:
+```sh
+# Can be any openai api compatible llm inference url
+DANKSY_INFERENCE_URL 
+# API Key for access
+DANKSY_INFERENCE_API_KEY
+```
+Currently, the default miner code is set up to use inference models from [fireworks ai](https://fireworks.ai/). However, any llm inference method (hosted, locally run, etc) is possible as long as the miner code returns a generated response.
+
+### Serving
+
+From the root of your project, you can just call **comx module serve**. For example:
+
+```sh
+SUBNET_UID=x
+PUBLIC_IP_ADDRESS=x
+comx module serve src.subnet.miner.model.Miner <name-of-your-com-key> --subnets-whitelist $SUBNET_UID \
+--ip $PUBLIC_IP_ADDRESS --port 8000
+```
+
+### Registration
+
+
+To register the miner use:
+```sh
+SUBNET_UID=x
+comx module register <name-of-your-miner> <name-of-your-com-key> --ip <your-ip-of-the-server> --port 8000 --netuid $SUBNET_UID  
+```

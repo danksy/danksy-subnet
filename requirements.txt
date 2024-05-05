@@ -3,3 +3,6 @@ typer
 uvicorn
 keylimiter
 pydantic-settings
+requests
+openai
+loguru
