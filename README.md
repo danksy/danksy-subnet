@@ -30,11 +30,21 @@ Please ensure that you have the following environment variable set:
 DANKSY_WORKLOAD_URL=https://workloads.danksy.ai/workload
 ```
 
+For proper monitoring, ensure you have `node` installed along with `pm2` for process management. 
+Alternatively, you can use other tools such as `tmux`, as long as you can manage the validator process 
+
+### Registering the validator
+```sh
+comx module register danksy-subnet::validator <your_commune_key> --netuid 4
+```
+
+
 ### Running
-To run the validator, just call the file in which you are executing `validator.validate_loop()`. For example:
+1. Navigate to `src/subnet`
+2. Run the following command:
 
 ```sh
-python3 -m commune-subnet-template.subnet.cli <name-of-your-com-key>
+pm2 start python3 -m cli <your_commune_key>
 ```
 
 ## Miner Setup

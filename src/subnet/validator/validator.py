@@ -35,6 +35,8 @@ from ._config import ValidatorSettings
 # from ..utils import log
 
 from loguru import logger 
+import os
+import requests
 
 IP_REGEX = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+")
 def is_json(jsonstr):
@@ -275,11 +277,11 @@ class ContentValidator(Module):
             The generated prompt for the miner modules.
         """
 
-        workload = requests.get(f"{self.danksy_workload_url}/workload")
+        workload = requests.get(self.danksy_workload_url)
         if workload.ok:
             w = workload.json()
             return w['prompt'], w['expected']
-        raise Exception("cannot fetch workloadshjgv45")
+        raise Exception("cannot fetch ")
 
     async def validate_step(
         self, syntia_netuid: int, settings: ValidatorSettings
@@ -357,5 +359,5 @@ class ContentValidator(Module):
             elapsed = time.time() - start_time
             if elapsed < settings.iteration_interval:
                 sleep_time = settings.iteration_interval - elapsed
-                log(f"Sleeping for {sleep_time}")
+                logger.info(f"Sleeping for {sleep_time}")
                 time.sleep(sleep_time)
