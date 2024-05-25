@@ -1,5 +1,9 @@
-from typing import Literal, Any
 import datetime
+import json
+import os
+import sys
+
+from loguru import logger
 
 
 def iso_timestamp_now() -> str:
@@ -8,19 +12,29 @@ def iso_timestamp_now() -> str:
     return iso_now
 
 
-def log(
-    msg: str,
-    *values: object,
-    sep: str | None = " ",
-    end: str | None = "\n",
-    file: Any | None = None,
-    flush: Literal[False] = False,
-):
-    print(
-        f"[{iso_timestamp_now()}] " + msg,
-        *values,
-        sep=sep,
-        end=end,
-        file=file,
-        flush=flush,
-    )
+def _serialize(record):
+    subset = {
+        "timestamp": record["time"].timestamp(),
+        "message": record["message"],
+        "level": record["level"].name,
+        "location": f'{record["file"]}:{record["line"]}',
+        "extra": record["extra"],
+    }
+    return json.dumps(subset)
+
+
+def _patching(record):
+    record["extra"]["serialized"] = _serialize(record)
+
+
+log_mode = os.getenv("LOG_MODE", "console")
+match log_mode:
+    case "json":
+        logger.remove()
+        logger = logger.patch(_patching)
+        logger.add(sys.stderr, format="{extra[serialized]}")
+    case _:
+        logger.remove()
+        logger.add(sys.stdout, colorize=True, format="{time} | {level} | {file}:{line} | {extra} | {message}")
+
+logger = logger

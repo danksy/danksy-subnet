@@ -1,0 +1,44 @@
+# Example snippet for instantiating Miner via cli
+import typer
+import uvicorn
+from typing import Annotated, Optional
+from subnet.utils import logger
+from keylimiter import TokenBucketLimiter
+from communex.compat.key import classic_load_key
+from communex.module.server import ModuleServer
+from model import Miner
+app = typer.Typer()
+
+@app.command('serve-miner')
+def serve(
+    commune_key: Annotated[
+        str, 
+        typer.Argument(
+            help="Name of the key present in `~/.commune/key`"
+            )
+        ],
+    ip: Optional[str] = None,
+    port: Optional[int] = None,
+    subnet: Optional[int] = None,
+    ):
+    keypair = classic_load_key(commune_key) # type: ignore
+    miner = Miner()
+    refill_rate = 1 / 400
+    # Implementing custom limit
+    bucket = TokenBucketLimiter(2, refill_rate)
+    subnet = subnet or 4
+    server = ModuleServer(
+        miner,
+        keypair,
+        limiter=bucket,
+        subnets_whitelist=[subnet],
+        use_testnet=True,
+    )
+    miner_app = server.get_fastapi_app()
+    host = ip or "0.0.0.0"
+    port_ = port or 8000
+    logger.bind(host=host, port=port_).info(f'Miner started with {keypair.ss58_address}')
+    uvicorn.run(miner_app, host=host, port=port_)
+
+if __name__ == "__main__":
+    typer.run(serve)

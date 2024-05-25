@@ -24,7 +24,7 @@ import concurrent.futures
 import re
 import time
 from functools import partial
-
+import json
 from communex.client import CommuneClient  # type: ignore
 from communex.module.client import ModuleClient  # type: ignore
 from communex.module.module import Module  # type: ignore
@@ -32,29 +32,29 @@ from communex.types import Ss58Address  # type: ignore
 from substrateinterface import Keypair  # type: ignore
 
 from ._config import ValidatorSettings
-# from ..utils import log
-
-from loguru import logger 
+from subnet.utils import logger
 import os
 import requests
 
 IP_REGEX = re.compile(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+")
+DEFAULT_WORKLOAD_URL = "https://workloads.danksy.ai/workload"
+DEFAULT_SLEEP_TIME_SECONDS = 60
 def is_json(jsonstr):
-  try:
-    json.loads(jsonstr)
-  except ValueError as e:
-    return False
-  return True
+    try:
+        json.loads(jsonstr)
+    except ValueError as e:
+        return False
+    return True
 
 def set_weights(
-    settings: ValidatorSettings,
-    score_dict: dict[
-        int, float
-    ],  # implemented as a float score from 0 to 1, one being the best
-    # you can implement your custom logic for scoring
-    netuid: int,
-    client: CommuneClient,
-    key: Keypair,
+        settings: ValidatorSettings,
+        score_dict: dict[
+            int, float
+        ],  # implemented as a float score from 0 to 1, one being the best
+        # you can implement your custom logic for scoring
+        netuid: int,
+        client: CommuneClient,
+        key: Keypair,
 ) -> None:
     """
     Set weights for miners based on their scores.
@@ -84,7 +84,6 @@ def set_weights(
         # Add the weighted score to the new dictionary
         weighted_scores[uid] = weight
 
-
     # filter out 0 weights
     weighted_scores = {k: v for k, v in weighted_scores.items() if v != 0}
 
@@ -93,9 +92,8 @@ def set_weights(
     # send the blockchain call
     client.vote(key=key, uids=uids, weights=weights, netuid=netuid)
 
-
 def cut_to_max_allowed_weights(
-    score_dict: dict[int, float], max_allowed_weights: int
+        score_dict: dict[int, float], max_allowed_weights: int
 ) -> dict[int, float]:
     """
     Cut the scores to the maximum allowed weights.
@@ -123,7 +121,7 @@ def extract_address(string: str):
     return re.search(IP_REGEX, string)
 
 
-def get_subnet_netuid(clinet: CommuneClient, subnet_name: str = "replace-with-your-subnet-name"):
+def get_subnet_netuid(clinet: CommuneClient, subnet_name: str = "danksy-subnet"):
     """
     Retrieve the network UID of the subnet.
 
@@ -184,17 +182,17 @@ class ContentValidator(Module):
     """
 
     def __init__(
-        self,
-        key: Keypair,
-        netuid: int,
-        client: CommuneClient,
-        call_timeout: int = 60,
+            self,
+            key: Keypair,
+            netuid: int,
+            client: CommuneClient,
+            call_timeout: int = 60,
     ) -> None:
         super().__init__()
         self.client = client
         self.key = key
         self.netuid = netuid
-        self.val_model = "foo"
+        self.val_model = "placeholder"
         self.call_timeout = call_timeout
         self.danksy_workload_url = os.getenv("DANKSY_WORKLOAD_URL")
 
@@ -209,16 +207,15 @@ class ContentValidator(Module):
         Returns:
             A dictionary mapping module IDs to their addresses.
         """
-
         # Makes a blockchain query for the miner addresses
-        module_addreses = client.query_map_address(netuid)
-        return module_addreses
+        module_addresses = client.query_map_address(netuid)
+        return module_addresses
 
     def _get_miner_prediction(
-        self,
-        question: str,
-        miner_info: tuple[list[str], Ss58Address],
-    ) -> str | None:
+            self,
+            question: str,
+            miner_info: tuple[list[str], Ss58Address],
+    ) -> dict[str, str] | None:
         """
         Prompt a miner module to generate an answer to the given prompt.
 
@@ -231,8 +228,10 @@ class ContentValidator(Module):
         """
         connection, miner_key = miner_info
         module_ip, module_port = connection
-        client = ModuleClient(module_ip, int(module_port), self.key)
+        miner_response = {}
         try:
+            client = ModuleClient(module_ip, int(module_port), self.key)
+            start_time = time.time()
             # handles the communication with the miner
             miner_answer = asyncio.run(
                 client.call(
@@ -242,13 +241,16 @@ class ContentValidator(Module):
                     timeout=self.call_timeout,  #  type: ignore
                 )
             )
-            miner_answer = miner_answer["answer"]
+            elapsed = time.time() - start_time
+            miner_response["elapsed"] = f"{elapsed}"
+            miner_response["answer"] = miner_answer["answer"]
+            logger.info(f'Miner {module_ip}:{module_port} answer length : {len(miner_answer)} with execution time {elapsed}')
 
         except Exception as e:
             logger.error(f"Miner {module_ip}:{module_port} failed to generate an answer")
             print(e)
-            miner_answer = None
-        return miner_answer
+            miner_response = None
+        return miner_response
 
     def _score_miner(self, miner_answer: str | None, expected_response: str) -> float:
         """
@@ -264,27 +266,34 @@ class ContentValidator(Module):
         result = json.loads(miner_answer)
         expected = json.loads(expected_response)
         total_expected_keys = len(expected)
-        matching_count = sum(1 for key in expected if key in result and expected[key] == result[key])
-        score = (matching_count / total_expected_keys)    
+        matching_count = sum(1 for key in expected if key in result and expected[key].lower() == result[key].lower())
+        score = (matching_count / total_expected_keys)
 
         return score
 
-    def get_miner_prompt(self, ) -> tuple[str, str]:
+    def get_miner_prompt_from_queue(self, ) -> tuple[str, str]:
         """
         Generate a prompt for the miner modules.
 
         Returns:
             The generated prompt for the miner modules.
         """
+        workload_url = self.danksy_workload_url or DEFAULT_WORKLOAD_URL
 
-        workload = requests.get(self.danksy_workload_url)
-        if workload.ok:
-            w = workload.json()
+        block = self.client.get_block()
+        block_number = block["header"]["number"]
+        params = {"block_number": block_number}
+        workload = requests.get(workload_url, params=params)
+        logger.bind(status_code=workload.status_code, content=workload.text, params=params).debug("called url")
+        workload_data = workload.json() if workload.ok else None
+        if workload_data is not None:
+            w = workload_data
+            logger.bind(block_number=block_number, wlen=len(w)).debug("fetched workload")
             return w['prompt'], w['expected']
-        raise Exception("cannot fetch ")
+        raise Exception("cannot fetch")
 
     async def validate_step(
-        self, syntia_netuid: int, settings: ValidatorSettings
+            self, netuid: int, settings: ValidatorSettings
     ) -> None:
         """
         Perform a validation step.
@@ -293,19 +302,18 @@ class ContentValidator(Module):
         and scores the generated answers against the validator's own answers.
 
         Args:
-            syntia_netuid: The network UID of the subnet.
+            netuid: The network UID of the subnet.
         """
 
-        # retrive the miner information
-        modules_adresses = self.get_addresses(self.client, syntia_netuid)
-        modules_keys = self.client.query_map_key(syntia_netuid)
+        modules_addresses = self.get_addresses(self.client, netuid)
+        modules_keys = self.client.query_map_key(netuid)
         val_ss58 = self.key.ss58_address
         if val_ss58 not in modules_keys.values():
             raise RuntimeError(f"validator key {val_ss58} is not registered in subnet")
 
         modules_info: dict[int, tuple[list[str], Ss58Address]] = {}
 
-        modules_filtered_address = get_ip_port(modules_adresses)
+        modules_filtered_address = get_ip_port(modules_addresses)
         for module_id in modules_keys.keys():
             module_addr = modules_filtered_address.get(module_id, None)
             if not module_addr:
@@ -314,20 +322,24 @@ class ContentValidator(Module):
 
         score_dict: dict[int, float] = {}
 
-        miner_prompt, expected_response = self.get_miner_prompt()
-        get_miner_prediction = partial(self._get_miner_prediction, miner_prompt)
+        for k, v in modules_info.values():
+            logger.info(f"Querying the following miner: {k} with {v}")
+        miner_prompt, expected_response = self.get_miner_prompt_from_queue()
+        logger.info(f"Fetched miner prompt with length {len(miner_prompt)}")
 
-        logger.info(f"Selected the following miners: {modules_info.keys()}")
+        get_miner_prediction = partial(self._get_miner_prediction, miner_prompt)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             it = executor.map(get_miner_prediction, modules_info.values())
             miner_answers = [*it]
 
         for uid, miner_response in zip(modules_info.keys(), miner_answers):
-            miner_answer = miner_response
-            if not miner_answer:
+            if not miner_response:
                 logger.info(f"Skipping miner {uid} that didn't answer")
                 continue
+            miner_answer = miner_response["answer"]
+            miner_time = miner_response["elapsed"]
+            logger.info(f"Miner {uid} took {miner_time}")
             score = 0
             # Miner response must be valid json
             if is_json(miner_answer):
@@ -351,13 +363,16 @@ class ContentValidator(Module):
         Args:
             settings: The validator settings to use for the validation loop.
         """
-
+        logger.info("Successfully initialized validator")
         while True:
-            start_time = time.time()
-            _ = asyncio.run(self.validate_step(self.netuid, settings))
+            try:
+                start_time = time.time()
+                _ = asyncio.run(self.validate_step(self.netuid, settings))
 
-            elapsed = time.time() - start_time
-            if elapsed < settings.iteration_interval:
-                sleep_time = settings.iteration_interval - elapsed
-                logger.info(f"Sleeping for {sleep_time}")
-                time.sleep(sleep_time)
+                elapsed = time.time() - start_time
+                if elapsed < settings.iteration_interval:
+                    sleep_time = settings.iteration_interval - elapsed
+                    time.sleep(sleep_time)
+            except Exception as e:
+                logger.bind(error=e).error("could not run validation step")
+                time.sleep(DEFAULT_SLEEP_TIME_SECONDS)
